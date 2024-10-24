@@ -6,12 +6,15 @@ import os
 import sys
 # Add ../ to the path
 # Works if this script is executed without installing the module
-script_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
-sys.path.insert(0, os.path.dirname(script_dir))
-# Pretend we are part of a module
-# Avoids: ImportError: attempted relative import with no known parent package
-__package__ = os.path.basename(script_dir)
-__import__(__package__)
+try:
+    import InteractiveHtmlBom
+except ImportError:
+    script_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
+    sys.path.insert(0, os.path.dirname(script_dir))
+    # Pretend we are part of a module
+    # Avoids: ImportError: attempted relative import with no known parent package
+    __package__ = os.path.basename(script_dir)
+    __import__(__package__)
 
 
 # python 2 and 3 compatibility hack
@@ -34,11 +37,18 @@ def main():
     elif hasattr(wx, "DisableAsserts"):
         wx.DisableAsserts()
 
-    from .core import ibom
-    from .core.config import Config
-    from .ecad import get_parser_by_extension
-    from .version import version
-    from .errors import (ExitCodes, ParsingException, exit_error)
+    try:
+        from .core import ibom
+        from .core.config import Config
+        from .ecad import get_parser_by_extension
+        from .version import version
+        from .errors import (ExitCodes, ParsingException, exit_error)
+    except ImportError:
+        from InteractiveHtmlBom.core import ibom
+        from InteractiveHtmlBom.core.config import Config
+        from InteractiveHtmlBom.ecad import get_parser_by_extension
+        from InteractiveHtmlBom.version import version
+        from InteractiveHtmlBom.errors import (ExitCodes, ParsingException, exit_error)
 
     parser = argparse.ArgumentParser(
             description='KiCad InteractiveHtmlBom plugin CLI.',
