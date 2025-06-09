@@ -133,6 +133,14 @@ function setHighlightPin1(value) {
   redrawIfInitDone();
 }
 
+function setHighlightRowOnClick(value) {
+  settings.highlightRowOnClick = value;
+  writeStorage("highlightRowOnClick", value);
+  if (initDone) {
+    populateBomTable();
+  }
+}
+
 function getStoredCheckboxRefs(checkbox) {
   function convert(ref) {
     var intref = parseInt(ref);
@@ -184,15 +192,15 @@ function setBomCheckboxState(checkbox, element, references) {
   element.indeterminate = (state == "indeterminate");
 }
 
-function createCheckboxChangeHandler(checkbox, references, row) {
-  return function () {
+function createCheckboxHandlers(input, checkbox, references, row) {
+  var clickHandler = () => {
     refsSet = getStoredCheckboxRefs(checkbox);
     var markWhenChecked = settings.markWhenChecked == checkbox;
     eventArgs = {
       checkbox: checkbox,
       refs: references,
     }
-    if (this.checked) {
+    if (input.checked) {
       // checkbox ticked
       for (var ref of references) {
         refsSet.add(ref[1]);
@@ -224,6 +232,22 @@ function createCheckboxChangeHandler(checkbox, references, row) {
     updateCheckboxStats(checkbox);
     EventHandler.emitEvent(IBOM_EVENT_TYPES.CHECKBOX_CHANGE_EVENT, eventArgs);
   }
+
+  return [
+    (e) => {
+      clickHandler();
+    },
+    (e) => {
+      e.preventDefault();
+      if (row.onmousemove) row.onmousemove();
+    },
+    (e) => {
+      e.preventDefault();
+      input.checked = !input.checked;
+      input.indeterminate = false;
+      clickHandler();
+    }
+  ];
 }
 
 function clearHighlightedFootprints() {
@@ -290,7 +314,7 @@ function entryMatches(entry) {
     return entry.toLowerCase().indexOf(filter) >= 0;
   }
   // check refs
-  if (!settings.hiddenColumns.includes("references")) {
+  if (!settings.hiddenColumns.includes("References")) {
     for (var ref of entry) {
       if (ref[0].toLowerCase().indexOf(filter) >= 0) {
         return true;
@@ -336,6 +360,35 @@ function highlightFilter(s) {
     pos += parts[i].length;
   }
   return r;
+}
+
+function getBomListByLayer(layer) {
+  switch (layer) {
+    case 'F': return pcbdata.bom.F.slice();
+    case 'B': return pcbdata.bom.B.slice();
+    case 'FB': return pcbdata.bom.both.slice();
+  }
+  return [];
+}
+
+function getSelectedBomList() {
+  if (settings.bommode == "netlist") {
+    return pcbdata.nets.slice();
+  }
+  var out = getBomListByLayer(settings.canvaslayout);
+
+  if (settings.bommode == "ungrouped") {
+    // expand bom table
+    var expandedTable = [];
+    for (var bomentry of out) {
+      for (var ref of bomentry) {
+        expandedTable.push([ref]);
+      }
+    }
+    return expandedTable;
+  }
+
+  return out;
 }
 
 function checkboxSetUnsetAllHandler(checkboxname) {
@@ -550,7 +603,7 @@ function populateBomHeader(placeHolderColumn = null, placeHolderElements = null)
         tr.appendChild(createColumnHeader("References", "references", (a, b) => {
           var i = 0;
           while (i < a.length && i < b.length) {
-            if (a[i] != b[i]) return compareRefs(a[i][0], b[i][0]);
+            if (a[i][0] != b[i][0]) return compareRefs(a[i][0], b[i][0]);
             i++;
           }
           return a.length - b.length;
@@ -595,31 +648,9 @@ function populateBomBody(placeholderColumn = null, placeHolderElements = null) {
   var first = true;
   var style = getComputedStyle(topmostdiv);
   var defaultNetColor = style.getPropertyValue('--track-color').trim();
-  if (settings.bommode == "netlist") {
-    bomtable = pcbdata.nets.slice();
-  } else {
-    switch (settings.canvaslayout) {
-      case 'F':
-        bomtable = pcbdata.bom.F.slice();
-        break;
-      case 'FB':
-        bomtable = pcbdata.bom.both.slice();
-        break;
-      case 'B':
-        bomtable = pcbdata.bom.B.slice();
-        break;
-    }
-    if (settings.bommode == "ungrouped") {
-      // expand bom table
-      expandedTable = []
-      for (var bomentry of bomtable) {
-        for (var ref of bomentry) {
-          expandedTable.push([ref]);
-        }
-      }
-      bomtable = expandedTable;
-    }
-  }
+
+  bomtable = getSelectedBomList();
+
   if (bomSortFunction) {
     bomtable = bomtable.sort(bomSortFunction);
   }
@@ -679,7 +710,7 @@ function populateBomBody(placeholderColumn = null, placeHolderElements = null) {
               td = document.createElement("TD");
               var input = document.createElement("input");
               input.type = "checkbox";
-              input.onchange = createCheckboxChangeHandler(checkbox, references, tr);
+              [input.onchange, td.ontouchstart, td.ontouchend] = createCheckboxHandlers(input, checkbox, references, tr);
               setBomCheckboxState(checkbox, input, references);
               if (input.checked && settings.markWhenChecked == checkbox) {
                 tr.classList.add("checked");
@@ -721,7 +752,11 @@ function populateBomBody(placeholderColumn = null, placeHolderElements = null) {
     }
     bom.appendChild(tr);
     var handler = createRowHighlightHandler(tr.id, references, netname);
-    tr.onmousemove = handler;
+    if (settings.highlightRowOnClick) {
+      tr.onmousedown = handler;
+    } else {
+      tr.onmousemove = handler;
+    }
     highlightHandlers.push({
       id: tr.id,
       handler: handler,
@@ -1035,7 +1070,8 @@ function toggleBomCheckbox(bomrowid, checkboxnum) {
     return;
   }
   var bomrow = document.getElementById(bomrowid);
-  var checkbox = bomrow.childNodes[checkboxnum].childNodes[0];
+  var childNum = checkboxnum + settings.columnOrder.indexOf("checkboxes");
+  var checkbox = bomrow.childNodes[childNum].childNodes[0];
   checkbox.checked = !checkbox.checked;
   checkbox.indeterminate = false;
   checkbox.onchange();
@@ -1051,7 +1087,8 @@ function checkBomCheckbox(bomrowid, checkboxname) {
     return;
   }
   var bomrow = document.getElementById(bomrowid);
-  var checkbox = bomrow.childNodes[checkboxnum + 1].childNodes[0];
+  var childNum = checkboxnum + 1 + settings.columnOrder.indexOf("checkboxes");
+  var checkbox = bomrow.childNodes[childNum].childNodes[0];
   checkbox.checked = true;
   checkbox.indeterminate = false;
   checkbox.onchange();
@@ -1264,10 +1301,10 @@ function topToggle() {
 }
 
 window.onload = function (e) {
-  initUtils();
   initRender();
   initStorage();
   initDefaults();
+  initUtils();
   cleanGutters();
   populateMetadata();
   dbgdiv = document.getElementById("dbg");
