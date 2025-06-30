@@ -20,7 +20,6 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "wxpython>=4.0",
   "jsonschema>=4.1",
 ]
 
